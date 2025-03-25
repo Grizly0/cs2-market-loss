@@ -1,58 +1,53 @@
-// Backend: Server Express pour récupérer les prix des objets CS2
-// Ce serveur appelle l'API Steam pour obtenir les prix et les stocke temporairement
-
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
+
 app.use(cors());
 
-const STEAM_API_URL = "https://steamcommunity.com/market/priceoverview/?currency=3&appid=730&market_hash_name=";
-
-// Liste des objets à suivre (exemple)
 const items = [
-    "AK-47 | Redline (Field-Tested)",
-    "AWP | Asiimov (Field-Tested)",
-    "M4A4 | Howl (Factory New)"
+    'AK-47 | Redline (Field-Tested)',
+    'AWP | Asiimov (Battle-Scarred)',
+    'M4A1-S | Hyper Beast (Minimal Wear)',
+    'Desert Eagle | Blaze (Factory New)',
 ];
 
-let prices = {}; // Stock temporaire des prix
+const priceHistory = {};
 
 async function fetchPrices() {
-    for (let item of items) {
+    for (const item of items) {
+        const marketName = encodeURIComponent(item);
+        const url = `https://steamcommunity.com/market/priceoverview/?currency=3&appid=730&market_hash_name=${marketName}`;
+
         try {
-            let response = await axios.get(STEAM_API_URL + encodeURIComponent(item));
-            if (response.data.success) {
-                const price = parseFloat(response.data.lowest_price.replace("€", "").replace(",", "."));
-                if (!prices[item]) {
-                    prices[item] = { old: price, current: price, history: [price] };
-                } else {
-                    prices[item].old = prices[item].current;
-                    prices[item].current = price;
-                    prices[item].history.push(price);
-                    if (prices[item].history.length > 10) prices[item].history.shift(); // Garde un historique limité
-                }
+            const response = await axios.get(url);
+            const data = response.data;
+            if (data.success) {
+                const currentPrice = parseFloat(data.lowest_price?.replace('€', '').replace(',', '.')) || 0;
+                if (!priceHistory[item]) priceHistory[item] = [];
+                priceHistory[item].push(currentPrice);
+                if (priceHistory[item].length > 10) priceHistory[item].shift();
             }
-        } catch (error) {
-            console.error("Erreur lors de la récupération du prix de", item, error);
+        } catch (err) {
+            console.log(`Erreur avec ${item}:`, err.message);
         }
     }
-    console.log("Prix mis à jour", prices);
 }
 
-// Met à jour les prix toutes les 30 minutes
-setInterval(fetchPrices, 30 * 60 * 1000);
+setInterval(fetchPrices, 1000 * 60 * 30); // toutes les 30 minutes
 fetchPrices();
 
-app.get("/prices", (req, res) => {
-    let sortedItems = Object.entries(prices).map(([name, { old, current, history }]) => {
-        let loss = old > current ? ((old - current) / old) * 100 : 0;
-        return { name, old, current, loss: loss.toFixed(2), history };
+app.get('/prices', (req, res) => {
+    const result = Object.entries(priceHistory).map(([name, history]) => {
+        const current = history[history.length - 1];
+        const old = history[0];
+        const loss = old ? (((old - current) / old) * 100).toFixed(2) : 0;
+        return { name, current, history, loss };
     }).sort((a, b) => b.loss - a.loss);
-    res.json(sortedItems);
+
+    res.json(result);
 });
 
-app.listen(PORT, () => console.log(`Serveur backend en cours d'exécution sur http://localhost:${PORT}`));
-
+app.listen(PORT, () => console.log(`Serveur actif sur http://localhost:${PORT}`));
